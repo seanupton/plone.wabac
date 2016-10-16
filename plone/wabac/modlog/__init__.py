@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 
-from BTrees.OOBTree import OOBTree
+import itertools
+import random
+
+import BTrees
 from persistent.mapping import PersistentMapping
 from persistent.list import PersistentList
 from plone.uuid.interfaces import IUUID
@@ -29,12 +32,159 @@ class ChangesetView(object):
             raise ValueError('Valid modification logger not provided.')
         self.__parent__ = modlog
         self.__name__ = unicode(facility)
+        self._keyname = '%s_keys' % self.__name__
 
-    def _storage(self):
+    def _storage(self, name=None):
+        name = name or self.__name__
         core = self.__parent__.storage()
         if core is None:
             return None
-        return core.get(self.__name__)
+        return core.get(name)
+
+    def _keystore(self):
+        return self._storage(self._keyname)
+
+    def get(self, key, default=None):
+        storage = self._storage()
+        if storage is None:
+            return default
+        return storage.get(key, default)
+
+    def __getitem__(self, key):
+        r = self.get(key)
+        if r is None:
+            raise KeyError('Key not found: %s' % key)
+        return r
+
+    def __contains__(self, key):
+        return key in self.keys()
+
+    def __len__(self):
+        return len(self.keys())
+
+    def keys(self):
+        return (self._keystore() or []).keys()
+
+    def iterkeys(self):
+        store = self._keystore()
+        if store is None:
+            return iter([])
+        return iter(store)
+
+    def itervalues(self):
+        return itertools.imap(self.get, self.iterkeys())
+
+    def iteritems(self):
+        return itertools.imap(lambda k: (k, self.get(k)), self.iterkeys())
+
+    def values(self):
+        return list(self.itervalues())
+
+    def items(self):
+        return list(self.iteritems())
+
+    def match(self, filters, record):
+        # compare path by prefix...
+        if 'path' in filters:
+            if not record.get('path', '').startswith(filters['path']):
+                return False
+        # ...everything else by exact match
+        for k in (filter, lambda k: k != 'path', filters):
+            if filters[k] != record.get(k):
+                return False
+        return True
+
+    def limit(self, filters=None, start=0):
+        if not filters:
+            return iter(self.keys()[start:])
+        # TODO: indexed filtering, for now, just crawl through the muck
+        return itertools.ifilter(self.match, map(self.get, self.key()))
+
+
+def FacilityStorage(object):
+    """Storage adapter for modification logger"""
+
+    family = BTrees.family32   # noqa
+
+    def __init__(self, context, name):
+        self.logger = context
+        self.site = context.site
+        self.name = name
+        # Storage state to be created on first insertion, to avoid
+        # any possibility of write-on-read situations
+        self.storage = self._core_storage()
+        self.facility_storage = self._facility_mapping()
+        self.key_storage = self._key_storage()
+
+    def generate_key(self):
+        while True:
+            minkey, maxkey = (
+                self.family.minint,
+                self.family.maxint
+                )
+            k = random.randrange(minkey, maxkey)
+            keystore = self.key_storage()
+            if (keystore and k not in keystore) or not keystore:
+                return k
+
+    def _core_storage(self, create=False):
+        anno = IAnnotations(self.context)
+        storage = anno.get(ANNO_KEY)
+        if not storage and create:
+            storage = anno[ANNO_KEY] = PersistentMapping()
+        return storage
+
+    def _facility_mapping(self, create=False):
+        storage = self._core_storage(create=create)
+        facility = storage.get(self.name)
+        if facility is None and create:
+            facility = storage[self.name] = self.family.IO()   # IOBTree
+        return facility
+
+    def _facility_keys(self, create=False):
+        storage = self._core_storage(create=create)
+        facility_keys = storage.get(u'%s_keys' % self.name)
+        if facility_keys is None and create:
+            facility_keys = storage[u'%s_keys' % self.name] = PersistentList()
+        return facility_keys
+
+    def prep_insert(self):
+        if self.storage is None:
+            self.storage = self._core_storage(create=True)
+        if self.facility_storage is None:
+            self.facility_storage = self._facility_mapping(create=True)
+        if self.key_storage is None:
+            self.key_storage = self._key_storage(create=True)
+        return (self.facility_storage, self.key_storage)
+
+    def _user(self, user=None):
+        if user is None:
+            mtool = getToolByName(self.logger.context, 'portal_membership')
+            user = mtool.getAuthenticatedMember().getUserName()
+        return user
+
+    def insert(self, content, user, extra):
+        record_storage, keys = self.prep_insert()
+        key = self.generate_key()
+        uid = IUUID(content)
+        user = self._user(user)
+        record = {
+            'uid': uid,
+            'path': '/'.join(content.getPhysicalPath()),
+            'user': user,
+            }
+        if extra:
+            record['extra'] = dict(extra)
+        record_storage[key] = record
+        # TODO: need to consider whether there are potential
+        #       conflict resolution issues with using a
+        #       PersistentList without subclassing and
+        #       using _p_resolveConflict on the insertion;
+        #       fear is that some expensive transaction takes
+        #       a long time to retry whole request over
+        #       simple race condition on the insertion order
+        #       in the PersistentList used here?
+        keys.insert(0, key)
 
 
 def ModificationLogger(object):
@@ -48,63 +198,13 @@ def ModificationLogger(object):
             site = getSite()
         self.context = site
 
-    def _storage(self):
-        anno = IAnnotations(self.context)
-        return anno.get(ANNO_KEY)
-
-    def _checkstore(self):
-        storage = self._storage()
-        if storage is None:
-            anno = IAnnotations(self.context)
-            storage = anno[self.KEY] = PersistentMapping()
-        return storage
-
-    def _checkfacility(self, storage, name):
-        """Returns mapping and keys for facility as two-item tuple"""
-        facility = storage.get(name)
-        if facility is None:
-            facility = storage[name] = OOBTree()
-        facility_keys = storage.get(u'%s_keys' % name)
-        if facility_keys is None:
-            facility_keys = storage[u'%s_keys' % name] = PersistentList()
-        return (facility, facility_keys)
-
-    def _user(self, user=None):
-        if user is None:
-            mtool = getToolByName(self.context, 'portal_membership')
-            user = mtool.getAuthenticatedMember().getUserName()
-        return user
-
-    def _insert(self, facility, keys, content, user, extra):
-        """Insert in such a way that LIFO order of keys is preserved"""
-        uid = IUUID(content)
-        user = self._user(user)
-        record = {
-            'uid': uid,
-            'path': '/'.join(content.getPhysicalPath()),
-            'user': user,
-            }
-        if extra:
-            record['extra'] = dict(extra)
-        self.facility[uid] = record
-        # TODO: need to consider whether there are potential
-        #       conflict resolution issues with using a
-        #       PersistentList without subclassing and
-        #       using _p_resolveConflict on the insertion;
-        #       fear is that some expensive transaction takes
-        #       a long time to retry whole request over
-        #       simple race condition on the insertion order
-        #       in the PersistentList used here?
-        self.keys.insert(0, uid)
-
     def log(self, action, content, user=None, extra=None):
-        core_storage = self._checkstore()
         name = {
             'modify': u'modifications',
             'delete': u'deletions',
             'add': u'additions',
             'move': u'moves',
             }.get(action) or unicode(action)
-        facility, keys = self._checkfacility(core_storage, name)
-        self._insert(facility, keys, content, user, extra)
+        facility = FacilityStorage(self, name)
+        facility.insert(content, user, extra)
 

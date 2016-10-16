@@ -23,24 +23,16 @@ class IChangeEnumeration(IIterableMapping, ILocation):
     may not be idemopotent, and could cause unanticipated database writes.
     """
 
-    def keys():
-        """Keys provided in LIFO order as UID of changed content"""
-
-    def iterkeys():
-        """
-        Iterator to keys provided in LIFO order.
-
-        For batched views, prefer limit() to iterkeys().
-        """
-
     def limit(filters=None, start=0):
         """
-        Return an iterator in LIFO order matching filters, which is provided
-        as a mapping.  If filters is None, return equivalent to iterkeys().
+        Return an iterator of records in LIFO order matching filters,
+        which should be provided as a mapping.
+
+        If filters is None, return equivalent to itervalues().
 
         To use for batching, callers should pass batch start index
         using the 'start' argument, iterating through only the batch size,
-        as needed.
+        as needed.  Start is zero-indexed.
         """
 
 
