@@ -6,7 +6,7 @@ from zope.location.interfaces import ILocation
 from zope import schema
 
 
-class IOrderedChangeset(IIterableMapping, ILocation):
+class IChangeEnumeration(IIterableMapping, ILocation):
     """
     A component for enumerating, in LIFO order, a specific named change set,
     and to filter enumerated change records.
@@ -69,25 +69,25 @@ class IModificationLogger(Interface):
 
     modifications = schema.Object(
         description=u'Modification records audit log',
-        schema=IOrderedChangeset,
+        schema=IChangeEnumeration,
         readonly=True
         )
 
     deletions = schema.Object(
         description=u'Deletion records audit log',
-        schema=IOrderedChangeset,
+        schema=IChangeEnumeration,
         readonly=True
         )
 
     additions = schema.Object(
         description=u'Addition records audit log',
-        schema=IOrderedChangeset,
+        schema=IChangeEnumeration,
         readonly=True
         )
 
     moves = schema.Object(
         description=u'Move/rename records audit log',
-        schema=IOrderedChangeset,
+        schema=IChangeEnumeration,
         readonly=True
         )
 
