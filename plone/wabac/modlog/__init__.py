@@ -210,11 +210,13 @@ def FacilityStorage(object):
         keys.insert(0, key)
 
 
-def ModificationLogger(object):
+class ModificationLogger(object):
     """
     Adapter of site, fronts for logging to annotation-based storage
     using OOTB data types.
     """
+
+    implements(IModificationLogger)
 
     def __init__(self, site=None):
         if site is None:
