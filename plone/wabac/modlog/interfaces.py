@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from zope.inteface import Interface
-from zope.inteface.common.mapping import IIterableMapping
+from zope.interface import Interface
+from zope.interface.common.mapping import IIterableMapping
 from zope.location.interfaces import ILocation
 from zope import schema
 
