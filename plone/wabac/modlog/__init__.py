@@ -115,6 +115,29 @@ def FacilityStorage(object):
         self.storage = self._core_storage()
         self.facility_storage = self._facility_mapping()
         self.key_storage = self._key_storage()
+        # Facilities initially uninitialized:
+        self._facilities = {}
+
+    def _facility(self, key):
+        if self._facilities.get(key) is None:
+            self._facilities[key] = ChangesetView(self, key)
+        return self._facilities[key]
+
+    @property
+    def modifications(self):
+        return self._facility(self, 'modifications')
+
+    @property
+    def moves(self):
+        return self._facility(self, 'moves')
+
+    @property
+    def deletions(self):
+        return self._facility(self, 'deletions')
+
+    @property
+    def additions(self):
+        return self._facility(self, 'additions')
 
     def generate_key(self):
         while True:
