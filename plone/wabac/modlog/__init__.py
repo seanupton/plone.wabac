@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from datetime import datetime
 import itertools
 import random
 
@@ -101,20 +102,20 @@ class ChangesetView(object):
         return itertools.ifilter(self.match, map(self.get, self.key()))
 
 
-def FacilityStorage(object):
+class FacilityStorage(object):
     """Storage adapter for modification logger"""
 
     family = BTrees.family32   # noqa
 
     def __init__(self, context, name):
         self.logger = context
-        self.site = context.site
+        self.site = context.context
         self.name = name
         # Storage state to be created on first insertion, to avoid
         # any possibility of write-on-read situations
-        self.storage = self._core_storage()
-        self.facility_storage = self._facility_mapping()
-        self.key_storage = self._key_storage()
+        self.storage = None
+        self.facility_storage = None
+        self.key_storage = None
 
     def generate_key(self):
         while True:
@@ -123,7 +124,7 @@ def FacilityStorage(object):
                 self.family.maxint
                 )
             k = random.randrange(minkey, maxkey)
-            keystore = self.key_storage()
+            keystore = self._facility_keys()
             if (keystore and k not in keystore) or not keystore:
                 return k
 
@@ -134,7 +135,7 @@ def FacilityStorage(object):
         storage = self._core_storage(create=create)
         facility = storage.get(self.name)
         if facility is None and create:
-            facility = storage[self.name] = self.family.IO()   # IOBTree
+            facility = storage[self.name] = self.family.IO.BTree()
         return facility
 
     def _facility_keys(self, create=False):
@@ -150,7 +151,7 @@ def FacilityStorage(object):
         if self.facility_storage is None:
             self.facility_storage = self._facility_mapping(create=True)
         if self.key_storage is None:
-            self.key_storage = self._key_storage(create=True)
+            self.key_storage = self._facility_keys(create=True)
         return (self.facility_storage, self.key_storage)
 
     def _user(self, user=None):
@@ -168,6 +169,7 @@ def FacilityStorage(object):
             'uid': uid,
             'path': '/'.join(content.getPhysicalPath()),
             'user': user,
+            'when': datetime.now()
             }
         if extra:
             record['extra'] = dict(extra)
@@ -214,6 +216,18 @@ class ModificationLogger(object):
             }.get(action) or unicode(action)
         facility = FacilityStorage(self, name)
         facility.insert(content, user, extra)
+
+    def modified(self, content, user=None, extra=None):
+        self.log('modify', content, user, extra)
+
+    def added(self, content, user=None, extra=None):
+        self.log('add', content, user, extra)
+
+    def moved(self, content, user=None, extra=None):
+        self.log('move', content, user, extra)
+
+    def deleted(self, content, user=None, extra=None):
+        self.log('delete', content, user, extra)
 
     def _facility(self, key):
         if self._facilities.get(key) is None:
