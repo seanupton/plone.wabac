@@ -63,7 +63,7 @@ class ChangesetView(object):
         return len(self.keys())
 
     def keys(self):
-        return (self._keystore() or []).keys()
+        return (self._keystore() or [])
 
     def iterkeys(self):
         store = self._keystore()
@@ -115,29 +115,6 @@ def FacilityStorage(object):
         self.storage = self._core_storage()
         self.facility_storage = self._facility_mapping()
         self.key_storage = self._key_storage()
-        # Facilities initially uninitialized:
-        self._facilities = {}
-
-    def _facility(self, key):
-        if self._facilities.get(key) is None:
-            self._facilities[key] = ChangesetView(self, key)
-        return self._facilities[key]
-
-    @property
-    def modifications(self):
-        return self._facility(self, 'modifications')
-
-    @property
-    def moves(self):
-        return self._facility(self, 'moves')
-
-    @property
-    def deletions(self):
-        return self._facility(self, 'deletions')
-
-    @property
-    def additions(self):
-        return self._facility(self, 'additions')
 
     def generate_key(self):
         while True:
@@ -151,11 +128,7 @@ def FacilityStorage(object):
                 return k
 
     def _core_storage(self, create=False):
-        anno = IAnnotations(self.context)
-        storage = anno.get(ANNO_KEY)
-        if not storage and create:
-            storage = anno[ANNO_KEY] = PersistentMapping()
-        return storage
+        return self.logger.storage(create)
 
     def _facility_mapping(self, create=False):
         storage = self._core_storage(create=create)
@@ -222,6 +195,15 @@ class ModificationLogger(object):
         if site is None:
             site = getSite()
         self.context = site
+        # Facilities initially uninitialized:
+        self._facilities = {}
+
+    def storage(self, create=False):
+        anno = IAnnotations(self.context)
+        storage = anno.get(ANNO_KEY)
+        if not storage and create:
+            storage = anno[ANNO_KEY] = PersistentMapping()
+        return storage
 
     def log(self, action, content, user=None, extra=None):
         name = {
@@ -232,4 +214,25 @@ class ModificationLogger(object):
             }.get(action) or unicode(action)
         facility = FacilityStorage(self, name)
         facility.insert(content, user, extra)
+
+    def _facility(self, key):
+        if self._facilities.get(key) is None:
+            self._facilities[key] = ChangesetView(self, key)
+        return self._facilities[key]
+
+    @property
+    def modifications(self):
+        return self._facility('modifications')
+
+    @property
+    def moves(self):
+        return self._facility('moves')
+
+    @property
+    def deletions(self):
+        return self._facility('deletions')
+
+    @property
+    def additions(self):
+        return self._facility('additions')
 
