@@ -1,6 +1,7 @@
 # modificaiton log and enumeration testing
 
 from datetime import datetime
+import time
 import unittest
 
 from plone import api
@@ -71,3 +72,19 @@ class TestModificationLogging(unittest.TestCase):
         self.assertEqual(path, record.get('path'))
         self.assertEqual(user.getUserName(), record.get('user'))
         self.assertTrue(isinstance(record.get('when'), datetime))
+        # test prune all; works because timespec is slightly newer:
+        logger.prune(None, timespec=datetime.now())
+        self.assertTrue(len(facility) == 0)
+        self.assertTrue(len(facility.keys()) == 0)
+        # modify again, prune again
+        logger.modified(self.content1)  # should trigger storage of metadata
+        self.assertTrue(len(facility) == 1)
+        logger.prune('modifications', timespec=datetime.now())
+        self.assertTrue(len(facility) == 0)
+        # test pruning with days
+        logger.modified(self.content1)  # should trigger storage of metadata
+        self.assertTrue(len(facility) == 1)
+        time.sleep(0.05)
+        logger.prune('modifications', days=0.0000001)
+        self.assertTrue(len(facility) == 0)
+

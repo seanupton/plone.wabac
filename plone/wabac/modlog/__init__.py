@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
 import itertools
 import random
 
@@ -28,11 +29,11 @@ class ChangesetView(object):
 
     implements(IChangeEnumeration)
 
-    def __init__(self, modlog, facility):
-        if not IModificationLogger.providedBy(modlog):
+    def __init__(self, context, name):
+        if not IModificationLogger.providedBy(context):
             raise ValueError('Valid modification logger not provided.')
-        self.__parent__ = modlog
-        self.__name__ = unicode(facility)
+        self.__parent__ = self.context = context
+        self.__name__ = unicode(name)
         self._keyname = '%s_keys' % self.__name__
 
     def _storage(self, name=None):
@@ -102,15 +103,14 @@ class ChangesetView(object):
         return itertools.ifilter(self.match, map(self.get, self.key()))
 
 
-class FacilityStorage(object):
+class FacilityStorage(ChangesetView):
     """Storage adapter for modification logger"""
 
     family = BTrees.family32   # noqa
 
     def __init__(self, context, name):
-        self.logger = context
+        super(FacilityStorage, self).__init__(context, name)
         self.site = context.context
-        self.name = name
         # Storage state to be created on first insertion, to avoid
         # any possibility of write-on-read situations
         self.storage = None
@@ -129,20 +129,21 @@ class FacilityStorage(object):
                 return k
 
     def _core_storage(self, create=False):
-        return self.logger.storage(create)
+        return self.context.storage(create)
 
     def _facility_mapping(self, create=False):
         storage = self._core_storage(create=create)
-        facility = storage.get(self.name)
+        facility = storage.get(self.__name__)
         if facility is None and create:
-            facility = storage[self.name] = self.family.IO.BTree()
+            facility = storage[self.__name__] = self.family.IO.BTree()
         return facility
 
     def _facility_keys(self, create=False):
         storage = self._core_storage(create=create)
-        facility_keys = storage.get(u'%s_keys' % self.name)
+        keyname = u'%s_keys' % self.__name__
+        facility_keys = storage.get(keyname)
         if facility_keys is None and create:
-            facility_keys = storage[u'%s_keys' % self.name] = PersistentList()
+            facility_keys = storage[keyname] = PersistentList()
         return facility_keys
 
     def prep_insert(self):
@@ -156,7 +157,7 @@ class FacilityStorage(object):
 
     def _user(self, user=None):
         if user is None:
-            mtool = getToolByName(self.logger.context, 'portal_membership')
+            mtool = getToolByName(self.site, 'portal_membership')
             user = mtool.getAuthenticatedMember().getUserName()
         return user
 
@@ -184,6 +185,16 @@ class FacilityStorage(object):
         #       in the PersistentList used here?
         keys.insert(0, key)
 
+    def __delitem__(self, key):
+        store = self._facility_mapping()
+        keystore = self._facility_keys()
+        if store is None or keystore is None:
+            raise KeyError('Key not in (empty, uninitialized) store')
+        if key not in store or key not in keystore:
+            raise KeyError('Key not in store')
+        keystore.remove(key)
+        del(store[key])
+
 
 class ModificationLogger(object):
     """
@@ -192,6 +203,13 @@ class ModificationLogger(object):
     """
 
     implements(IModificationLogger)
+
+    ACTION_FACILITIES = {
+        'modify': u'modifications',
+        'delete': u'deletions',
+        'add': u'additions',
+        'move': u'moves',
+    }
 
     def __init__(self, site=None):
         if site is None:
@@ -208,12 +226,7 @@ class ModificationLogger(object):
         return storage
 
     def log(self, action, content, user=None, extra=None):
-        name = {
-            'modify': u'modifications',
-            'delete': u'deletions',
-            'add': u'additions',
-            'move': u'moves',
-            }.get(action) or unicode(action)
+        name = self.ACTION_FACILITIES.get(action) or unicode(action)
         facility = FacilityStorage(self, name)
         facility.insert(content, user, extra)
 
@@ -231,7 +244,7 @@ class ModificationLogger(object):
 
     def _facility(self, key):
         if self._facilities.get(key) is None:
-            self._facilities[key] = ChangesetView(self, key)
+            self._facilities[key] = FacilityStorage(self, key)
         return self._facilities[key]
 
     @property
@@ -249,4 +262,24 @@ class ModificationLogger(object):
     @property
     def additions(self):
         return self._facility('additions')
+
+    def _prune(self, name, timespec):
+        # now begins the long slog through unindexed records...
+        facility = self._facility(name)
+        result = filter(
+            lambda p: p[1].get('when') < timespec,
+            list(facility.items())
+            )
+        for (key, record) in result:
+            del(facility[key])
+
+    def prune(self, facility=None, days=None, timespec=None):
+        if days is None and timespec is None:
+            raise ValueError('Unspecified modification log pruning time')
+        facilities = self.ACTION_FACILITIES.values()
+        facilities = facilities if facility is None else (facility,)
+        if days:
+            timespec = datetime.now() - timedelta(days=float(days))
+        for name in facilities:
+            self._prune(name, timespec)
 
