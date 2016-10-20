@@ -5,14 +5,17 @@ import time
 import unittest
 
 from plone import api
+from plone.app.testing import TEST_USER_ID, TEST_USER_NAME
+from plone.app.testing import setRoles, login
 from plone.uuid.interfaces import IUUID
+from zope.lifecycleevent import ObjectModifiedEvent
+from zope.lifecycleevent import ObjectMovedEvent, ObjectRemovedEvent
+from zope.event import notify
+
 from plone.wabac.modlog.interfaces import IModificationLogger
 from plone.wabac.modlog.interfaces import IChangeEnumeration
 from plone.wabac.modlog import ModificationLogger, ChangesetView
 from plone.wabac.testing import PLONE_WABAC_INTEGRATION_TESTING  # noqa
-
-from plone.app.testing import TEST_USER_ID, TEST_USER_NAME
-from plone.app.testing import setRoles, login
 
 
 class TestModificationLogging(unittest.TestCase):
@@ -52,7 +55,8 @@ class TestModificationLogging(unittest.TestCase):
     def test_facility_storage(self):
         """Test facility storage, initially empty, then populated"""
         logger = IModificationLogger(self.portal)
-        # everything is initially empty
+        # guarantee that everything is initially empty by pruning days=0
+        logger.prune(None, days=0)
         for name in ('modifications', 'moves', 'deletions', 'additions'):
             facility = getattr(logger, name)
             self.assertFalse(len(facility))
@@ -88,3 +92,45 @@ class TestModificationLogging(unittest.TestCase):
         logger.prune('modifications', days=0.0000001)
         self.assertTrue(len(facility) == 0)
 
+    def test_handlers(self):
+        logger = IModificationLogger(self.portal)
+        # guarantee that everything is initially empty by pruning days=0
+        logger.prune(None, days=0)
+        for name in ('modifications', 'moves', 'deletions', 'additions'):
+            facility = getattr(logger, name)
+            self.assertFalse(len(facility))
+            self.assertFalse(len(facility.keys()))
+        # Add some content we can modify, and throw away
+        content = api.content.create(
+            type='Document',
+            title='Throw away',
+            container=self.portal,
+            )
+        uid = IUUID(content)
+        # api will have notified ObjectAddedEvent by effect, let's verify:
+        self.assertTrue(len(logger.additions) == 1)
+        self.assertTrue(logger.additions.values()[0].get('uid') == uid)
+        # api create will have also renamed the item, logging a move:
+        self.assertTrue(len(logger.moves.keys()) == 1)
+        # modification logging:
+        self.assertFalse(len(logger.modifications.keys()))
+        notify(ObjectModifiedEvent(content))
+        self.assertTrue(len(logger.modifications.keys()))
+        self.assertTrue(logger.modifications.values()[0].get('uid') == uid)
+        # move/rename logging:
+        self.assertTrue(len(logger.moves.keys()) == 1)
+        notify(ObjectMovedEvent(
+            content,
+            self.portal,
+            content.getId(),
+            self.portal,
+            'haha'
+            ))
+        self.assertTrue(len(logger.moves.keys()) == 2)
+        # finally removal:
+        self.assertFalse(len(logger.deletions.keys()))
+        notify(ObjectRemovedEvent(content))
+        self.assertTrue(len(logger.deletions.keys()))
+        self.assertTrue(logger.deletions.values()[0].get('uid') == uid)
+        # clean up after testing:
+        logger.prune(None, days=0)

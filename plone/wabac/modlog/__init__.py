@@ -278,7 +278,7 @@ class ModificationLogger(object):
             raise ValueError('Unspecified modification log pruning time')
         facilities = self.ACTION_FACILITIES.values()
         facilities = facilities if facility is None else (facility,)
-        if days:
+        if days is not None:
             timespec = datetime.now() - timedelta(days=float(days))
         for name in facilities:
             self._prune(name, timespec)

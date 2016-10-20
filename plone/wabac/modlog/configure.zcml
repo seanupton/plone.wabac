@@ -10,4 +10,29 @@
     for="Products.CMFCore.interfaces.ISiteRoot"
     />
 
+  <!-- modification subscribers -->
+  <subscriber
+    for="Products.CMFCore.interfaces.IContentish
+         zope.lifecycleevent.interfaces.IObjectModifiedEvent"
+    handler=".handlers.log_modified"
+    />
+
+  <subscriber
+    for="Products.CMFCore.interfaces.IContentish
+         zope.lifecycleevent.interfaces.IObjectRemovedEvent"
+    handler=".handlers.log_deleted"
+    />
+
+  <subscriber
+    for="Products.CMFCore.interfaces.IContentish
+         zope.lifecycleevent.interfaces.IObjectMovedEvent"
+    handler=".handlers.log_moved"
+    />
+
+  <subscriber
+    for="Products.CMFCore.interfaces.IContentish
+         zope.lifecycleevent.interfaces.IObjectAddedEvent"
+    handler=".handlers.log_added"
+    />
+
 </configure>
