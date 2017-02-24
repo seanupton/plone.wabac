@@ -2,6 +2,8 @@
 from zope.lifecycleevent.interfaces import IObjectAddedEvent
 from zope.lifecycleevent.interfaces import IObjectRemovedEvent
 
+from Products.CMFCore.interfaces import ISiteRoot
+
 from plone.wabac.modlog import ModificationLogger
 
 
@@ -10,6 +12,8 @@ def log_modified(context, event):
 
 
 def log_deleted(context, event):
+    if ISiteRoot.providedBy(event.object):
+        return
     ModificationLogger().deleted(context)
 
 
